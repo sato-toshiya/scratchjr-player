@@ -46,9 +46,9 @@ sequenceDiagram
 ### 2. Google Apps Script (GAS) のセットアップ
 1. [Google Apps Script](https://script.google.com/) で新しいプロジェクトを作成します。
 2. `gas/Code.gs` の内容をそのまま貼り付けます。
-3. 15 行目の `PLAYER_APP_URL` を、Netlify の URL に書き換えます：
+3. 15 行目の `PLAYER_APP_URL` を確認します（すでに設定済みです）：
    ```javascript
-   var PLAYER_APP_URL = "https://xxxx.netlify.app/player.html";
+   var PLAYER_APP_URL = "https://scratchjr-player.netlify.app/player.html";
    ```
 4. 右上の **「デプロイ」 > 「新しいデプロイ」** を選択：
    * 種類: **ウェブアプリ**
