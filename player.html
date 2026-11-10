@@ -22,7 +22,7 @@
         justify-content: center;
         align-items: center;
         z-index: 99999;
-        font-family: sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
         font-size: 18px;
         transition: opacity 0.3s;
       }
@@ -49,13 +49,18 @@
     <script>
       window.scratchJrPage = "editor";
 
-      // 共通URLパラメータ取得
+      // URLパラメータ取得
       function getParam(key) {
         if (window.urlParams) {
           return window.urlParams(key);
         }
         var match = RegExp("[?&]" + key + "=([^&]*)").exec(window.location.search);
         return match && decodeURIComponent(match[1].replace(/\+/g, " "));
+      }
+
+      function updateStatus(text) {
+        var el = document.getElementById("player-loading-text");
+        if (el) el.innerText = text;
       }
 
       function hideLoading() {
@@ -77,9 +82,41 @@
         if (err) err.innerText = msg;
       }
 
+      // ScratchJr の基本初期化が完了するのを待機
+      function waitUntilScratchJrReady(callback) {
+        var checkCount = 0;
+        var interval = setInterval(function() {
+          checkCount++;
+          if (window.ScratchJr && window.ScratchJr.loadProjectSjr && window.ScratchJr.stage) {
+            clearInterval(interval);
+            callback();
+          } else if (checkCount > 100) { // 15秒以上
+            clearInterval(interval);
+            showError("ScratchJr エンジンの初期化がタイムアウトしました。");
+          }
+        }, 150);
+      }
+
+      // プロジェクトデータの展開・ステージ準備が完了するのを待機
+      function waitForProjectReady(callback) {
+        var checkCount = 0;
+        var interval = setInterval(function() {
+          checkCount++;
+          if (window.ScratchJr && window.ScratchJr.stage && window.ScratchJr.stage.currentPage) {
+            clearInterval(interval);
+            callback();
+          } else if (checkCount > 100) { // 15秒以上
+            clearInterval(interval);
+            // タイムアウトしても一応 callback を呼んでみる
+            callback();
+          }
+        }, 150);
+      }
+
       // Base64 から .sjr (ZIP) をロードして ScratchJr ランタイムへ渡す
       function loadSjrFromBase64(base64Data, autoPlay) {
         try {
+          updateStatus("プロジェクトを展開中...");
           var binaryString = atob(base64Data);
           var len = binaryString.length;
           var bytes = new Uint8Array(len);
@@ -89,38 +126,74 @@
           var blob = new Blob([bytes], { type: "application/zip" });
           var blobUrl = URL.createObjectURL(blob);
 
-          var checkInterval = setInterval(function() {
-            if (window.ScratchJr && window.ScratchJr.loadProjectSjr) {
-              clearInterval(checkInterval);
-              window.ScratchJr.loadProjectSjr(blobUrl);
-              hideLoading();
-
-              if (autoPlay) {
-                setTimeout(function() {
-                  startAutoPlay();
-                }, 1200);
+          waitUntilScratchJrReady(function() {
+            updateStatus("プロジェクトを読み込んでいます...");
+            window.ScratchJr.loadProjectSjr(blobUrl, function(success) {
+              if (success === false) {
+                showError("プロジェクトの解凍または読み込みに失敗しました。");
+                return;
               }
-            }
-          }, 150);
+              waitForProjectReady(function() {
+                hideLoading();
+                if (autoPlay) {
+                  setTimeout(function() {
+                    startAutoPlay();
+                  }, 400);
+                }
+              });
+            });
+          });
         } catch (e) {
           console.error(e);
           showError(e.message);
         }
       }
 
+      // 直接 URL (Blob または外部URL) からロード
+      function loadSjrFromUrl(url, autoPlay) {
+        updateStatus("プロジェクトをダウンロード中...");
+        waitUntilScratchJrReady(function() {
+          window.ScratchJr.loadProjectSjr(url, function(success) {
+            if (success === false) {
+              showError("プロジェクトのダウンロードに失敗しました。");
+              return;
+            }
+            waitForProjectReady(function() {
+              hideLoading();
+              if (autoPlay) {
+                setTimeout(startAutoPlay, 400);
+              }
+            });
+          });
+        });
+      }
+
       // 自動再生（全画面モード & 緑の旗スタート）
-      function startAutoPlay() {
+      function startAutoPlay(retryCount) {
+        retryCount = retryCount || 0;
         try {
-          if (window.ScratchJr) {
-            // 全画面モードへ切り替え
-            if (window.ScratchJr.enterFullScreen) {
-              var fakeEvt = { preventDefault: function(){}, stopPropagation: function(){} };
-              window.ScratchJr.enterFullScreen(fakeEvt);
+          if (!window.ScratchJr || !window.ScratchJr.stage || !window.ScratchJr.stage.currentPage) {
+            if (retryCount < 20) {
+              setTimeout(function() {
+                startAutoPlay(retryCount + 1);
+              }, 200);
             }
-            // 緑の旗実行
-            if (window.ScratchJr.runStrips) {
-              window.ScratchJr.runStrips({ preventDefault: function(){}, stopPropagation: function(){} });
-            }
+            return;
+          }
+
+          var fakeEvt = {
+            preventDefault: function() {},
+            stopPropagation: function() {}
+          };
+
+          // 全画面モードへ切り替え
+          if (typeof window.ScratchJr.enterFullScreen === "function") {
+            window.ScratchJr.enterFullScreen(fakeEvt);
+          }
+
+          // 緑の旗実行
+          if (typeof window.ScratchJr.runStrips === "function") {
+            window.ScratchJr.runStrips(fakeEvt);
           }
         } catch (err) {
           console.warn("Auto-play trigger exception:", err);
@@ -129,6 +202,7 @@
 
       // GAS Web API から JSONP で .sjr を取得する
       function fetchFromGas(gasUrl, fileId, autoPlay) {
+        updateStatus("Google ドライブからプロジェクトを取得中...");
         var callbackName = "gasCallback_" + Date.now();
         window[callbackName] = function(response) {
           delete window[callbackName];
@@ -148,7 +222,7 @@
         document.head.appendChild(script);
       }
 
-      // postMessage リスナー（GAS や親フレームからのメッセージ受け取り）
+      // postMessage リスナー（親フレームや GAS からのメッセージ受け取り）
       window.addEventListener("message", function(event) {
         try {
           var msg = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
@@ -158,6 +232,8 @@
               loadSjrFromBase64(msg.base64, autoPlay);
             } else if (msg.fileId && msg.gasUrl) {
               fetchFromGas(msg.gasUrl, msg.fileId, autoPlay);
+            } else if (msg.fileUrl) {
+              loadSjrFromUrl(msg.fileUrl, autoPlay);
             }
           }
         } catch (err) {
@@ -165,7 +241,7 @@
         }
       });
 
-      // ページ読み込み時の処理
+      // ページ読み込み完了時の処理
       window.addEventListener("DOMContentLoaded", function() {
         var fileId = getParam("id");
         var gasUrl = getParam("gas");
@@ -175,27 +251,26 @@
         if (fileId && gasUrl) {
           fetchFromGas(gasUrl, fileId, autoPlay);
         } else if (fileUrl) {
-          // 直接 URL からダウンロードして開く
-          var checkReady = setInterval(function() {
-            if (window.ScratchJr && window.ScratchJr.loadProjectSjr) {
-              clearInterval(checkReady);
-              window.ScratchJr.loadProjectSjr(fileUrl);
-              hideLoading();
-              if (autoPlay) {
-                setTimeout(startAutoPlay, 1200);
+          loadSjrFromUrl(fileUrl, autoPlay);
+        } else {
+          updateStatus("プロジェクトの受信を待機しています...");
+          // 親フレームへ準備完了通知を送る（親が postMessage を再送できるように）
+          try {
+            if (window.parent && window.parent !== window) {
+              window.parent.postMessage({ type: "PLAYER_READY" }, "*");
+            }
+          } catch (e) {}
+
+          // パラメータも postMessage もない場合、5秒後にローディングを消す
+          setTimeout(function() {
+            var overlay = document.getElementById("player-loading-overlay");
+            if (overlay && overlay.style.display !== "none") {
+              var txt = document.getElementById("player-loading-text");
+              if (txt && txt.innerText.indexOf("待機") > -1) {
+                hideLoading();
               }
             }
-          }, 150);
-        } else {
-          // パラメータがない場合はメッセージ待機または通常起動
-          var txt = document.getElementById("player-loading-text");
-          if (txt) {
-            txt.innerText = "プロジェクトの受信を待機しています...";
-          }
-          // 5秒待っても何も届かなければローディングを非表示にしてエディタをそのまま触れるようにする
-          setTimeout(function() {
-            hideLoading();
-          }, 4000);
+          }, 5000);
         }
       });
     </script>
@@ -204,7 +279,7 @@
   <body style="background: white">
     <div id="player-loading-overlay">
       <div class="spinner"></div>
-      <div id="player-loading-text">プロジェクトを読み込んでいます...</div>
+      <div id="player-loading-text">プレイヤーを初期化しています...</div>
       <div id="player-error-msg"></div>
     </div>
     <div class="frame" id="frame"></div>

@@ -1232,11 +1232,18 @@ var ScratchJr = function () {
 
   }, {
     key: "loadProjectSjr",
-    value: function loadProjectSjr(url) {
+    value: function loadProjectSjr(url, cb) {
       _Project2.default.downloadProject(url, function (md5) {
-        // window.location.href = 'editor.html?pmd5=' + md5 + '&mode=edit';
+        if (!md5) {
+          console.error("loadProjectSjr: failed to extract md5 from " + url);
+          if (cb) cb(false);
+          return;
+        }
         ScratchJr.currentProject = md5;
-        _IO2.default.getObject(md5 + "", _Project2.default.dataRecieved);
+        _IO2.default.getObject(md5 + "", function (data) {
+          _Project2.default.dataRecieved(data);
+          if (cb) cb(true, md5);
+        });
       });
     }
     //获取项目截图base64
@@ -1544,13 +1551,19 @@ var ScratchJr = function () {
   }, {
     key: "stopStrips",
     value: function stopStrips() {
-      runtime.stopThreads();
-      stage.currentPage.updateThumb();
+      if (runtime) {
+        runtime.stopThreads();
+      }
+      if (stage && stage.currentPage && typeof stage.currentPage.updateThumb === "function") {
+        stage.currentPage.updateThumb();
+      }
     }
   }, {
     key: "resetSprites",
     value: function resetSprites() {
-      stage.resetPage(stage.currentPage);
+      if (stage && stage.currentPage) {
+        stage.resetPage(stage.currentPage);
+      }
     }
   }, {
     key: "fullScreen",
@@ -2294,11 +2307,19 @@ var OS = function () {
     }, {
         key: 'stmt',
         value: function stmt(json, fcn) {
+            if (!tabletInterface) {
+                tabletInterface = _WebOS2.default;
+                tabletInterface.init();
+            }
             tabletInterface.stmt(json, fcn);
         }
     }, {
         key: 'query',
         value: function query(json, fcn) {
+            if (!tabletInterface) {
+                tabletInterface = _WebOS2.default;
+                tabletInterface.init();
+            }
             tabletInterface.query(json, fcn);
         }
 
@@ -3219,6 +3240,12 @@ var IO = function () {
   }, {
     key: "getObject",
     value: function getObject(md5, fcn) {
+      if (!md5 || typeof md5 !== "string") {
+        if (fcn) {
+          fcn("[]");
+        }
+        return;
+      }
       if (md5.indexOf("/") > -1) {
         var gotit = function gotit(str) {
           fcn(str);
@@ -11084,8 +11111,10 @@ var Project = function () {
           history.replaceState(null, document.title, location.href.split("?")[0] + "?pmd5=" + md5 + "&mode=edit");
           _IO2.default.getObject(md5 + "", Project.dataRecieved);
         });
-      } else {
+      } else if (_ScratchJr2.default.currentProject) {
         _IO2.default.getObject(_ScratchJr2.default.currentProject, Project.dataRecieved);
+      } else {
+        _ScratchJr2.default.log("No current project specified; standing by for SJR injection.");
       }
     }
   }, {
@@ -11122,6 +11151,10 @@ var Project = function () {
         _Paint2.default.layout();
         Project.setProgress(100);
         Project.liftCurtain();
+        _ScratchJr2.default.isProjectLoaded = true;
+        try {
+          window.dispatchEvent(new CustomEvent("projectLoaded", { detail: metadata }));
+        } catch (e) {}
         _ScratchJr2.default.stage.currentPage.update();
         _ScratchJr2.default.changed = false;
         _ScratchJr2.default.storyStarted = false;
@@ -50000,10 +50033,10 @@ var WebOS = function () {
 
     }], [{
         key: 'init',
-        value: function init() {
+        value: function init(fcn) {
             _Web2.default.init();
             tabletInterface = _Web2.default;
-            if (fcn) {
+            if (typeof fcn === 'function') {
                 fcn();
             }
         }

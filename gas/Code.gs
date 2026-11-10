@@ -86,12 +86,26 @@ function doGet(e) {
 
           var frame = document.getElementById("playerFrame");
           
+          function sendData() {
+            try {
+              if (frame && frame.contentWindow) {
+                frame.contentWindow.postMessage(sjrData, "*");
+              }
+            } catch (e) {}
+          }
+
           // iframe のロード完了時に postMessage でデータを送信
           frame.onload = function() {
-            setTimeout(function() {
-              frame.contentWindow.postMessage(sjrData, "*");
-            }, 600);
+            setTimeout(sendData, 500);
+            setTimeout(sendData, 1500);
           };
+
+          // 子フレームからの準備完了通知を受けた時にも送信
+          window.addEventListener("message", function(e) {
+            if (e.data && e.data.type === "PLAYER_READY") {
+              sendData();
+            }
+          });
         </script>
       </body>
       </html>
