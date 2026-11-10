@@ -1,0 +1,214 @@
+<!doctype html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta http-equiv="cache-control" content="no-cache" />
+    <meta charset="utf-8" />
+    <title>ScratchJr Player</title>
+    <script src="./js/jquery.min.js"></script>
+    <script src="./js/common.js"></script>
+    <style>
+      #player-loading-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.85);
+        color: #ffffff;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        align-items: center;
+        z-index: 99999;
+        font-family: sans-serif;
+        font-size: 18px;
+        transition: opacity 0.3s;
+      }
+      .spinner {
+        width: 48px;
+        height: 48px;
+        border: 5px solid rgba(255, 255, 255, 0.2);
+        border-radius: 50%;
+        border-top-color: #f7a827;
+        animation: spin 1s ease-in-out infinite;
+        margin-bottom: 16px;
+      }
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+      #player-error-msg {
+        color: #ff6b6b;
+        margin-top: 10px;
+        font-size: 14px;
+        max-width: 80%;
+        text-align: center;
+      }
+    </style>
+    <script>
+      window.scratchJrPage = "editor";
+
+      // 共通URLパラメータ取得
+      function getParam(key) {
+        if (window.urlParams) {
+          return window.urlParams(key);
+        }
+        var match = RegExp("[?&]" + key + "=([^&]*)").exec(window.location.search);
+        return match && decodeURIComponent(match[1].replace(/\+/g, " "));
+      }
+
+      function hideLoading() {
+        var overlay = document.getElementById("player-loading-overlay");
+        if (overlay) {
+          overlay.style.opacity = "0";
+          setTimeout(function() {
+            overlay.style.display = "none";
+          }, 300);
+        }
+      }
+
+      function showError(msg) {
+        var spinner = document.querySelector(".spinner");
+        if (spinner) spinner.style.display = "none";
+        var txt = document.getElementById("player-loading-text");
+        if (txt) txt.innerText = "プロジェクトの読み込みに失敗しました";
+        var err = document.getElementById("player-error-msg");
+        if (err) err.innerText = msg;
+      }
+
+      // Base64 から .sjr (ZIP) をロードして ScratchJr ランタイムへ渡す
+      function loadSjrFromBase64(base64Data, autoPlay) {
+        try {
+          var binaryString = atob(base64Data);
+          var len = binaryString.length;
+          var bytes = new Uint8Array(len);
+          for (var i = 0; i < len; i++) {
+            bytes[i] = binaryString.charCodeAt(i);
+          }
+          var blob = new Blob([bytes], { type: "application/zip" });
+          var blobUrl = URL.createObjectURL(blob);
+
+          var checkInterval = setInterval(function() {
+            if (window.ScratchJr && window.ScratchJr.loadProjectSjr) {
+              clearInterval(checkInterval);
+              window.ScratchJr.loadProjectSjr(blobUrl);
+              hideLoading();
+
+              if (autoPlay) {
+                setTimeout(function() {
+                  startAutoPlay();
+                }, 1200);
+              }
+            }
+          }, 150);
+        } catch (e) {
+          console.error(e);
+          showError(e.message);
+        }
+      }
+
+      // 自動再生（全画面モード & 緑の旗スタート）
+      function startAutoPlay() {
+        try {
+          if (window.ScratchJr) {
+            // 全画面モードへ切り替え
+            if (window.ScratchJr.enterFullScreen) {
+              var fakeEvt = { preventDefault: function(){}, stopPropagation: function(){} };
+              window.ScratchJr.enterFullScreen(fakeEvt);
+            }
+            // 緑の旗実行
+            if (window.ScratchJr.runStrips) {
+              window.ScratchJr.runStrips({ preventDefault: function(){}, stopPropagation: function(){} });
+            }
+          }
+        } catch (err) {
+          console.warn("Auto-play trigger exception:", err);
+        }
+      }
+
+      // GAS Web API から JSONP で .sjr を取得する
+      function fetchFromGas(gasUrl, fileId, autoPlay) {
+        var callbackName = "gasCallback_" + Date.now();
+        window[callbackName] = function(response) {
+          delete window[callbackName];
+          if (response && response.success && response.data) {
+            loadSjrFromBase64(response.data, autoPlay);
+          } else {
+            showError(response ? response.error : "空の応答が返されました");
+          }
+        };
+
+        var script = document.createElement("script");
+        var separator = gasUrl.indexOf("?") >= 0 ? "&" : "?";
+        script.src = gasUrl + separator + "id=" + encodeURIComponent(fileId) + "&callback=" + callbackName;
+        script.onerror = function() {
+          showError("GAS API への接続に失敗しました。URLをご確認ください。");
+        };
+        document.head.appendChild(script);
+      }
+
+      // postMessage リスナー（GAS や親フレームからのメッセージ受け取り）
+      window.addEventListener("message", function(event) {
+        try {
+          var msg = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
+          if (msg && msg.type === "LOAD_SJR") {
+            var autoPlay = msg.autoPlay !== undefined ? msg.autoPlay : true;
+            if (msg.base64) {
+              loadSjrFromBase64(msg.base64, autoPlay);
+            } else if (msg.fileId && msg.gasUrl) {
+              fetchFromGas(msg.gasUrl, msg.fileId, autoPlay);
+            }
+          }
+        } catch (err) {
+          console.warn("Message handle error:", err);
+        }
+      });
+
+      // ページ読み込み時の処理
+      window.addEventListener("DOMContentLoaded", function() {
+        var fileId = getParam("id");
+        var gasUrl = getParam("gas");
+        var fileUrl = getParam("file");
+        var autoPlay = getParam("autoPlay") !== "0";
+
+        if (fileId && gasUrl) {
+          fetchFromGas(gasUrl, fileId, autoPlay);
+        } else if (fileUrl) {
+          // 直接 URL からダウンロードして開く
+          var checkReady = setInterval(function() {
+            if (window.ScratchJr && window.ScratchJr.loadProjectSjr) {
+              clearInterval(checkReady);
+              window.ScratchJr.loadProjectSjr(fileUrl);
+              hideLoading();
+              if (autoPlay) {
+                setTimeout(startAutoPlay, 1200);
+              }
+            }
+          }, 150);
+        } else {
+          // パラメータがない場合はメッセージ待機または通常起動
+          var txt = document.getElementById("player-loading-text");
+          if (txt) {
+            txt.innerText = "プロジェクトの受信を待機しています...";
+          }
+          // 5秒待っても何も届かなければローディングを非表示にしてエディタをそのまま触れるようにする
+          setTimeout(function() {
+            hideLoading();
+          }, 4000);
+        }
+      });
+    </script>
+    <script type="text/javascript" src="app.bundle.js"></script>
+  </head>
+  <body style="background: white">
+    <div id="player-loading-overlay">
+      <div class="spinner"></div>
+      <div id="player-loading-text">プロジェクトを読み込んでいます...</div>
+      <div id="player-error-msg"></div>
+    </div>
+    <div class="frame" id="frame"></div>
+    <div class="libframe" id="libframe"></div>
+    <div class="paintframe" id="paintframe"></div>
+  </body>
+</html>

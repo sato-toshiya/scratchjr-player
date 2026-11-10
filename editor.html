@@ -1,0 +1,264 @@
+<!doctype html>
+<html xmlns="http://www.w3.org/1999/xhtml" xmlns:xlink="http://www.w3.org/1999/xlink">
+  <meta
+    name="viewport"
+    content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+  />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta http-equiv="cache-control" content="no-cache" />
+  <meta charset="utf-8" />
+
+  <head>
+    <title>Junior</title>
+    <script src="./js/jquery.min.js"></script>
+    <script src="./js/jquery.cokie.min.js"></script>
+    <script src="./js/qiniu.min.js"></script>
+    <script src="./js/common.js"></script>
+    <script>
+      var isOfflineBundle = window.location && window.location.protocol === "file:"
+      var uploadParam = {}
+      var workId = urlParams("workId")
+      var unitId = urlParams("unitId")
+      var access_token = getUserToken()
+      var userInfo = getUserInfo()
+      var qn_token = null
+      if (!isOfflineBundle) {
+        qn_token = getQiniuToken()
+        setInterval(function () {
+          qn_token = getQiniuToken()
+        }, 600 * 1000)
+      }
+
+      var observer = {
+        next(res) {},
+        error(err) {
+          console.log(1, err)
+        },
+        complete(res) {
+          console.log(res)
+          if (res.key.includes("png")) {
+            uploadParam.coverKey = uploadFile(res.key, "学生作业-封面", res.key)
+          } else {
+            uploadParam.projectKey = uploadFile(res.key, "学生作业-sjr", res.key)
+          }
+          if (uploadParam.projectKey && uploadParam.coverKey) {
+            uploadWork(uploadParam.projectKey, uploadParam.coverKey, uploadParam.projectTitle)
+          }
+        },
+      }
+
+      window.scratchJrPage = "editor"
+      window.JrConfig = {
+        onSaveCloud: function (contents, name) {
+          if (isOfflineBundle) {
+            if (window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(
+                JSON.stringify({
+                  type: "CLOUD_SAVE_SKIPPED",
+                  reason: "offline_file_bundle",
+                }),
+              )
+            }
+            return
+          }
+
+          console.log("content:" + contents)
+          console.log(name)
+          var uuid = window.uuid()
+          uploadParam.projectTitle = name
+          upload2Qiniu(contents, "scratchjr/" + uuid + ".sjr", name, observer)
+          window.ScratchJr.getProjectCover((r) => {
+            blob = dataURLtoBlob(r)
+            upload2Qiniu(blob, "scratchjr/" + uuid + ".png", name, observer)
+          })
+        },
+      }
+
+      function setupReactNativeMessageListener() {
+        var messageHandler = function (event) {
+          try {
+            var data
+            if (typeof event.data === "string") {
+              data = JSON.parse(event.data)
+            } else if (event.nativeEvent && event.nativeEvent.data) {
+              data = JSON.parse(event.nativeEvent.data)
+            } else {
+              return
+            }
+
+            if (data.type === "GET_PROJECT_CONTENTS") {
+              var isAutoSave = data.isAutoSave || false
+              var shouldNavigateAfterSave = data.shouldNavigateAfterSave || false
+              if (window.ScratchJr && window.ScratchJr.getProjectSjr) {
+                window.ScratchJr.onHold = true
+
+                window.ScratchJr.getProjectSjr(function (contents, fileName) {
+                  window.ScratchJr.onHold = false
+
+                  var reader = new FileReader()
+                  reader.onloadend = function () {
+                    var base64String = reader.result
+                    var base64Data = base64String.split(",")[1]
+
+                    // Lấy thumbnail của project
+                    if (window.ScratchJr && window.ScratchJr.getProjectCover) {
+                      window.ScratchJr.getProjectCover(function (thumbnailDataURL) {
+                        var thumbnailBase64 = thumbnailDataURL.split(",")[1]
+
+                        if (window.ReactNativeWebView) {
+                          window.ReactNativeWebView.postMessage(
+                            JSON.stringify({
+                              type: "PROJECT_CONTENTS_RESPONSE",
+                              contents: base64Data,
+                              fileName: fileName || "project.sjr",
+                              thumbnail: thumbnailBase64,
+                              isAutoSave: isAutoSave,
+                              shouldNavigateAfterSave: shouldNavigateAfterSave,
+                            }),
+                          )
+                        }
+                      })
+                    } else {
+                      if (window.ReactNativeWebView) {
+                        window.ReactNativeWebView.postMessage(
+                          JSON.stringify({
+                            type: "PROJECT_CONTENTS_RESPONSE",
+                            contents: base64Data,
+                            fileName: fileName || "project.sjr",
+                            isAutoSave: isAutoSave,
+                            shouldNavigateAfterSave: shouldNavigateAfterSave,
+                          }),
+                        )
+                      }
+                    }
+                  }
+                  reader.onerror = function (error) {
+                    console.error("Error reading blob:", error)
+                    if (window.ReactNativeWebView) {
+                      window.ReactNativeWebView.postMessage(
+                        JSON.stringify({
+                          type: "PROJECT_CONTENTS_ERROR",
+                          error: "Failed to convert blob to base64",
+                        }),
+                      )
+                    }
+                  }
+                  reader.readAsDataURL(contents)
+                })
+              } else {
+                if (window.ReactNativeWebView) {
+                  window.ReactNativeWebView.postMessage(
+                    JSON.stringify({
+                      type: "PROJECT_CONTENTS_ERROR",
+                      error: "ScratchJr.getProjectSjr is not available",
+                    }),
+                  )
+                }
+              }
+            }
+          } catch (error) {
+            console.error("Error handling message:", error)
+            if (window.ReactNativeWebView) {
+              window.ReactNativeWebView.postMessage(
+                JSON.stringify({
+                  type: "PROJECT_CONTENTS_ERROR",
+                  error: error.message,
+                }),
+              )
+            }
+          }
+        }
+
+        document.addEventListener("message", messageHandler)
+        window.addEventListener("message", messageHandler)
+      }
+
+      if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", setupReactNativeMessageListener)
+      } else {
+        setupReactNativeMessageListener()
+      }
+
+      //上传文件
+      function uploadFile(fileName, fileTag, filePath) {
+        var id = null
+        $.ajax({
+          url: "/api/system/sysFile/add",
+          type: "POST",
+          dataType: "json",
+          contentType: "application/json",
+          async: false,
+          beforeSend: function (request) {
+            request.setRequestHeader("X-Access-Token", access_token)
+          },
+          data: JSON.stringify({
+            fileType: 2,
+            fileName: fileName,
+            filePath: filePath,
+            fileLocation: 2,
+            fileTag: fileTag,
+          }),
+          success: function (res) {
+            if (res.success) {
+              id = res.result.id
+            }
+          },
+          error: function () {},
+          complete: function () {},
+        })
+        return id
+      }
+
+      //上传作业
+      function uploadWork(projectKey, coverKey, projectTitle) {
+        $.ajax({
+          url: "/api/teaching/teachingWork/submit",
+          type: "POST",
+          dataType: "json",
+          contentType: "application/json",
+          beforeSend: function (request) {
+            request.setRequestHeader("X-Access-Token", access_token)
+          },
+          data: JSON.stringify({
+            courseId: unitId,
+            workCover: coverKey,
+            workFile: projectKey,
+            workName: projectTitle,
+            id: workId,
+            workType: 2,
+          }),
+          success: function (res) {
+            canShare = true
+            if (res.code == 200) {
+              alert("上传成功")
+            } else {
+            }
+          },
+          error: function () {},
+          complete: function () {},
+        })
+      }
+
+      function upload2Qiniu(zip, key, fileName, observer) {
+        var config = {
+          useCdnDomain: true,
+          region: qiniu.region.z0,
+          disableStatisticsReport: true,
+        }
+        var putExtra = {
+          fname: fileName, //文件原名
+          params: {},
+          mimeType: null,
+        }
+        var observable = qiniu.upload(zip, key, qn_token, putExtra, config)
+        var subscription = observable.subscribe(observer)
+      }
+    </script>
+    <script type="text/javascript" src="app.bundle.js"></script>
+  </head>
+  <body style="background: white">
+    <div class="frame" id="frame"></div>
+    <div class="libframe" id="libframe"></div>
+    <div class="paintframe" id="paintframe"></div>
+  </body>
+</html>
