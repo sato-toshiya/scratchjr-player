@@ -330,35 +330,6 @@
 
 #stageframe .stage.noteditable { left: 26px;}
 
-#stageframe .grid {
-    position: absolute;
-    left: 93px;
-    top: 2px;
-    width: 502px;
-    height: 362px;
-    z-index: 10;
-    background: yellow;
-}
-
-#stageframe .rownum{
-    position: absolute;
-    left: 68px;
-    top: 364px;
-    width: 532px;
-    height: 24px;
-    z-index: 10;
-    background: lime;
-}
-
-#stageframe .colnum{
-    position: absolute;
-    left: 68px;
-    top: 2px;
-    height: 380px;
-    width: 24px;
-    z-index: 10;
-    background: lime;
-}
 
 .nextpage {
     position: fixed;

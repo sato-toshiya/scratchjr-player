@@ -9,6 +9,13 @@
     <script src="./js/jquery.min.js"></script>
     <script src="./js/common.js"></script>
     <style>
+      html, body {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+      }
       #player-loading-overlay {
         position: fixed;
         top: 0;
@@ -71,6 +78,19 @@
             overlay.style.display = "none";
           }, 300);
         }
+        var bd = document.getElementById("backdrop");
+        if (bd) {
+          bd.style.display = "none";
+          bd.className = "modal-backdrop fade";
+        }
+        var md = document.getElementById("modaldialog");
+        if (md) {
+          md.style.display = "none";
+          md.className = "modal fade";
+        }
+        if (window.ScratchJr) {
+          window.ScratchJr.onHold = false;
+        }
       }
 
       function showError(msg) {
@@ -99,16 +119,28 @@
 
       // プロジェクトデータの展開・ステージ準備が完了するのを待機
       function waitForProjectReady(callback) {
+        if (window.ScratchJr && window.ScratchJr.isProjectLoaded) {
+          callback();
+          return;
+        }
+        var called = false;
+        var done = function() {
+          if (called) return;
+          called = true;
+          window.removeEventListener("projectLoaded", done);
+          callback();
+        };
+        window.addEventListener("projectLoaded", done);
+
         var checkCount = 0;
         var interval = setInterval(function() {
           checkCount++;
-          if (window.ScratchJr && window.ScratchJr.stage && window.ScratchJr.stage.currentPage) {
+          if (window.ScratchJr && window.ScratchJr.isProjectLoaded) {
             clearInterval(interval);
-            callback();
-          } else if (checkCount > 100) { // 15秒以上
+            done();
+          } else if (checkCount > 60) { // 9秒以上
             clearInterval(interval);
-            // タイムアウトしても一応 callback を呼んでみる
-            callback();
+            done();
           }
         }, 150);
       }
@@ -223,10 +255,13 @@
       }
 
       // postMessage リスナー（親フレームや GAS からのメッセージ受け取り）
+      var _loadedOnce = false;
       window.addEventListener("message", function(event) {
         try {
           var msg = typeof event.data === "string" ? JSON.parse(event.data) : event.data;
           if (msg && msg.type === "LOAD_SJR") {
+            if (_loadedOnce) return;
+            _loadedOnce = true;
             var autoPlay = msg.autoPlay !== undefined ? msg.autoPlay : true;
             if (msg.base64) {
               loadSjrFromBase64(msg.base64, autoPlay);

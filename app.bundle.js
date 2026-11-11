@@ -2284,17 +2284,16 @@ var OS = function () {
         value: function waitForInterface(fcn) {
             // Already loaded the interface
             if (tabletInterface != null) {
-                fcn();
+                if (fcn) fcn();
                 return;
             }
-            if (_lib.isAndroid && typeof AndroidInterface === 'undefined' || _lib.isiOS && _typeof(window.tablet) !== 'object') {
-                // interface not loaded - come back in 100ms
-                setTimeout(function () {
-                    OS.waitForInterface(fcn);
-                }, 100);
+            if (typeof AndroidInterface !== 'undefined') {
+                tabletInterface = Android;
+            } else if (typeof window.tablet === 'object') {
+                tabletInterface = iOS;
+            } else {
+                tabletInterface = _WebOS2.default;
             }
-
-            tabletInterface = _WebOS2.default;
             tabletInterface.init();
             if (fcn) {
                 fcn();
@@ -3798,7 +3797,7 @@ var IO = function () {
       function refreshLobby() {
         if ((0, _lib.gn)("hometab") !== null) {
           // Check if we're on the lobby page
-          if (saveActual == saveExpected) {
+          if (saveActual == saveExpected && projectMd5 != null) {
             _Lobby2.default.setPage("home");
             callback(projectMd5);
           } else {
@@ -3806,7 +3805,7 @@ var IO = function () {
             setTimeout(refreshLobby, 100);
           }
         } else {
-          if (saveActual == saveExpected) {
+          if (saveActual == saveExpected && projectMd5 != null) {
             callback(projectMd5);
           } else {
             // Waiting for assets to be saved
@@ -8337,7 +8336,7 @@ var MediaLib = function () {
                 soundspath = parsedResult.soundspath;
 
                 MediaLib.localizeMediaNames();
-                MediaLib.generateKeys();
+                MediaLib.generateKeys(parsedResult.sprites);
 
                 whenDone();
             });
@@ -8359,7 +8358,7 @@ var MediaLib = function () {
         }
     }, {
         key: 'generateKeys',
-        value: function generateKeys() {
+        value: function generateKeys(allSprites) {
             for (var i = 0; i < backgrounds.length; i++) {
                 var bg = backgrounds[i];
                 keys[bg.md5] = {
@@ -8369,8 +8368,9 @@ var MediaLib = function () {
                 };
             }
 
-            for (var _i2 = 0; _i2 < sprites.length; _i2++) {
-                var spr = sprites[_i2];
+            var sprList = allSprites || sprites;
+            for (var _i2 = 0; _i2 < sprList.length; _i2++) {
+                var spr = sprList[_i2];
                 keys[spr.md5] = {
                     width: spr.width,
                     height: spr.height,
@@ -11244,7 +11244,12 @@ var Project = function () {
       if (mediaCount <= 0) {
         Project.getStarted(whenDone);
       } else {
+        var _loadWaitStart = Date.now();
         interval = window.setInterval(function () {
+          if (Date.now() - _loadWaitStart > 8000 && mediaCount > 0) {
+            console.warn('loadwait timeout (8s), forcing completion; mediaCount was ' + mediaCount);
+            mediaCount = 0;
+          }
           Project.loadTask(whenDone);
         }, 32);
       }
@@ -28743,6 +28748,11 @@ var Page = function () {
                 _OS2.default.getmedia(md5, nextStep);
             }
             function nextStep(base64) {
+                if (!base64) {
+                    console.warn('Asset missing or null for sprite:', spr.md5);
+                    if (whenDone) whenDone('');
+                    return;
+                }
                 doNext(atob(base64));
             }
             function doNext(str) {
@@ -28784,6 +28794,12 @@ var Page = function () {
                     if ((0, _lib.gn)('backdrop').className == 'modal-backdrop fade in') {
                         _Project2.default.setProgress(_Project2.default.getMediaLoadRatio(70));
                     }
+                    if (fcn) {
+                        fcn();
+                    }
+                };
+                img.onerror = function () {
+                    console.warn('Failed to load background image:', url);
                     if (fcn) {
                         fcn();
                     }
@@ -34648,6 +34664,10 @@ var Sprite = function () {
             var sprite = this;
             if (!img.complete) {
                 img.onload = function () {
+                    sprite.displaySprite(fcn);
+                };
+                img.onerror = function () {
+                    console.warn('Failed to load sprite image:', dataurl);
                     sprite.displaySprite(fcn);
                 };
             } else {
