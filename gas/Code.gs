@@ -60,7 +60,7 @@ function doGet(e) {
     var file = DriveApp.getFileById(fileId);
     var blob = file.getBlob();
     var base64 = Utilities.base64Encode(blob.getBytes());
-    var autoPlay = e.parameter.autoPlay !== "0";
+    var autoPlay = e.parameter.autoPlay !== "0" && e.parameter.autoPlay !== "false";
 
     var htmlContent = `
       <!DOCTYPE html>
@@ -212,7 +212,7 @@ function renderLauncherPage() {
         <p>Google ドライブ内の <code>.sjr</code> ファイルをブラウザ上で全画面再生します。<br>
         ドライブの共有リンク、またはファイル ID を入力してください。</p>
 
-        <form action="${currentUrl}" method="get">
+        <form id="playForm" action="${currentUrl}" method="get">
           <div class="input-group">
             <label for="idInput">Google ドライブのリンク または ファイル ID</label>
             <input type="text" id="idInput" name="id" placeholder="例: https://drive.google.com/file/d/1A2B3C.../view" required>
@@ -220,8 +220,9 @@ function renderLauncherPage() {
 
           <div class="checkbox-group">
             <label>
-              <input type="checkbox" name="autoPlay" value="1" checked> 起動時に緑の旗で自動再生する
+              <input type="checkbox" id="autoPlayCheckbox" checked> 起動時に緑の旗で自動再生する
             </label>
+            <input type="hidden" name="autoPlay" id="autoPlayHidden" value="1">
           </div>
 
           <button type="submit">プロジェクトを再生する ▶</button>
@@ -232,6 +233,18 @@ function renderLauncherPage() {
           Google ドライブで <code>.sjr</code> ファイルを右クリック ＞「リンクを取得」した URL をそのまま貼り付けるだけで再生できます。
         </div>
       </div>
+      <script>
+        var form = document.getElementById('playForm');
+        if (form) {
+          form.addEventListener('submit', function() {
+            var check = document.getElementById('autoPlayCheckbox');
+            var hidden = document.getElementById('autoPlayHidden');
+            if (check && hidden) {
+              hidden.value = check.checked ? '1' : '0';
+            }
+          });
+        }
+      </script>
     </body>
     </html>
   `;

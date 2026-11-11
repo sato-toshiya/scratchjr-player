@@ -333,12 +333,13 @@
 
 .nextpage {
     position: fixed;
-    bottom: 0;
+    top: 50%;
+    transform: translateY(-50%);
     right: 0;
-    margin: 0px ${css_vh(1.04)} ${css_vh(1.30)};
+    margin: 0px ${css_vh(1.04)};
     width: ${css_vh(6.51)};
     height: ${css_vh(6.51)};
-    z-index: 10;
+    z-index: 50;
     background: url('../assets/ui/nextpage.svg');
     background-size: 100%;
     -webkit-user-select: none;
@@ -352,12 +353,13 @@
 
 .prevpage {
     position: fixed;
-    bottom: 0;
+    top: 50%;
+    transform: translateY(-50%);
     left: 0;
-    margin: 0px ${css_vh(1.30)} ${css_vh(1.30)};
+    margin: 0px ${css_vh(1.30)};
     width: ${css_vh(6.51)};
     height: ${css_vh(6.51)};
-    z-index: 10;
+    z-index: 50;
     background: url('../assets/ui/prevpage.svg');
     background-size: 100%;
     -webkit-user-select: none;

@@ -52,6 +52,18 @@
         max-width: 80%;
         text-align: center;
       }
+      .nextpage {
+        top: 50% !important;
+        bottom: auto !important;
+        transform: translateY(-50%) !important;
+        z-index: 100 !important;
+      }
+      .prevpage {
+        top: 50% !important;
+        bottom: auto !important;
+        transform: translateY(-50%) !important;
+        z-index: 100 !important;
+      }
     </style>
     <script>
       window.scratchJrPage = "editor";
@@ -166,12 +178,7 @@
                 return;
               }
               waitForProjectReady(function() {
-                hideLoading();
-                if (autoPlay) {
-                  setTimeout(function() {
-                    startAutoPlay();
-                  }, 400);
-                }
+                startPresentationMode(autoPlay);
               });
             });
           });
@@ -191,26 +198,40 @@
               return;
             }
             waitForProjectReady(function() {
-              hideLoading();
-              if (autoPlay) {
-                setTimeout(startAutoPlay, 400);
-              }
+              startPresentationMode(autoPlay);
             });
           });
         });
       }
 
-      // 自動再生（全画面モード & 緑の旗スタート）
-      function startAutoPlay(retryCount) {
+      // プレゼンテーションモード（全画面表示）の準備と開始
+      // エディタ画面が一瞬露出しないよう、全画面化を完了させてからローディング画面を消す
+      function startPresentationMode(autoPlay, retryCount) {
         retryCount = retryCount || 0;
         try {
           if (!window.ScratchJr || !window.ScratchJr.stage || !window.ScratchJr.stage.currentPage) {
-            if (retryCount < 20) {
+            if (retryCount < 40) {
               setTimeout(function() {
-                startAutoPlay(retryCount + 1);
-              }, 200);
+                startPresentationMode(autoPlay, retryCount + 1);
+              }, 150);
+            } else {
+              hideLoading();
             }
             return;
+          }
+
+          // onHold ロックを解除
+          window.ScratchJr.onHold = false;
+
+          var bd = document.getElementById("backdrop");
+          if (bd) {
+            bd.style.display = "none";
+            bd.className = "modal-backdrop fade";
+          }
+          var md = document.getElementById("modaldialog");
+          if (md) {
+            md.style.display = "none";
+            md.className = "modal fade";
           }
 
           var fakeEvt = {
@@ -218,17 +239,28 @@
             stopPropagation: function() {}
           };
 
-          // 全画面モードへ切り替え
+          // 1. まず全画面モード（プレゼンテーションモード）へ切り替え
           if (typeof window.ScratchJr.enterFullScreen === "function") {
             window.ScratchJr.enterFullScreen(fakeEvt);
           }
 
-          // 緑の旗実行
-          if (typeof window.ScratchJr.runStrips === "function") {
-            window.ScratchJr.runStrips(fakeEvt);
+          // 2. autoPlay が有効（true/1）の場合のみ、緑の旗で自動再生開始
+          var shouldAutoPlay = (autoPlay === true || autoPlay === "1" || autoPlay === "true" || autoPlay === 1);
+          if (shouldAutoPlay) {
+            if (typeof window.ScratchJr.runStrips === "function") {
+              window.ScratchJr.runStrips(fakeEvt);
+            }
           }
+
+          // 3. 全画面表示への切り替えが完了してからローディング画面を非表示にする
+          // （エディタ画面が一瞬でも見えるのを完全に防止）
+          setTimeout(function() {
+            hideLoading();
+          }, 200);
+
         } catch (err) {
-          console.warn("Auto-play trigger exception:", err);
+          console.warn("Presentation mode trigger exception:", err);
+          hideLoading();
         }
       }
 
